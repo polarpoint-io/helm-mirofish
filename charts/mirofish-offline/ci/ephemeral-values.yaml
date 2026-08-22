@@ -1,0 +1,21 @@
+# No persistence, no model pull — the shape used for smoke tests and demos.
+api:
+  persistence:
+    enabled: false
+neo4j:
+  persistence:
+    enabled: false
+  auth:
+    password: ci-only-password
+ollama:
+  persistence:
+    enabled: false
+  modelPull:
+    enabled: false
+  models:
+    chat: qwen2.5:1.5b
+    embedding: nomic-embed-text
+config:
+  llmModel: qwen2.5:1.5b
+tests:
+  enabled: true

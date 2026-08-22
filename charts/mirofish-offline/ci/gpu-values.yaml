@@ -1,0 +1,18 @@
+# Ollama scheduled onto a GPU node pool.
+ollama:
+  gpu:
+    enabled: true
+    resourceName: nvidia.com/gpu
+    count: 1
+    nodeSelector:
+      cloud.google.com/gke-accelerator: nvidia-l4
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  resources:
+    requests:
+      cpu: "4"
+      memory: 24Gi
+    limits:
+      memory: 48Gi

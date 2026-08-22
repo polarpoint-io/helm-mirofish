@@ -1,0 +1,78 @@
+name: release-chart
+
+# Packages the chart and publishes it as an OCI artifact:
+#   oci://ghcr.io/<owner>/charts/mirofish-offline
+#
+# Triggered by a tag of the form chart-v<semver>, e.g. chart-v0.1.0.
+
+on:
+  push:
+    tags: ["chart-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CHART: charts/mirofish-offline
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Resolve and check the chart version
+        run: |
+          set -euo pipefail
+          chart_version="$(helm show chart "$CHART" | grep '^version:' | awk '{print $2}')"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="${GITHUB_REF_NAME#chart-v}"
+            if [ "$tag" != "$chart_version" ]; then
+              echo "::error::tag chart-v$tag does not match Chart.yaml version $chart_version"
+              exit 1
+            fi
+          else
+            # workflow_dispatch runs from a branch, where GITHUB_REF_NAME is
+            # the branch name and carries no version to compare against.
+            echo "Manual run: publishing version $chart_version from $GITHUB_REF_NAME"
+          fi
+          echo "version=$chart_version" >> "$GITHUB_ENV"
+
+      - name: Lint
+        run: helm lint "$CHART" --strict
+
+      - name: Package
+        run: helm package "$CHART" --destination dist
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push chart
+        run: |
+          helm push "dist/mirofish-offline-${{ env.version }}.tgz" \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tgz
+          generate_release_notes: true
+          body: |
+            Install:
+
+            ```
+            helm install mirofish oci://ghcr.io/${{ github.repository_owner }}/charts/mirofish-offline \
+              --version ${{ env.version }} \
+              --namespace mirofish --create-namespace
+            ```

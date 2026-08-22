@@ -1,0 +1,149 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $sel := include "mirofish.selectorLabels" . }}
+---
+## web: reachable from the ingress controller; talks to the API only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirofish.web.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "web") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- if .Values.networkPolicy.ingressControllerSelector }}
+        - {{- toYaml .Values.networkPolicy.ingressControllerSelector | nindent 10 }}
+        {{- else }}
+        ## No selector configured: accept from anywhere in the cluster.
+        - namespaceSelector: {}
+        {{- end }}
+        ## `helm test` runs in the release namespace and probes this Service.
+        - podSelector:
+            matchLabels:
+              {{- $sel | nindent 14 }}
+      ports:
+        - port: {{ .Values.web.service.targetPort }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "api") | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.service.port }}
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+## api: reachable from web (and helm test); talks to Neo4j and Ollama.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirofish.api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- $sel | nindent 14 }}
+        {{- if and .Values.ingress.enabled .Values.ingress.separateApiPath .Values.networkPolicy.ingressControllerSelector }}
+        ## ingress.separateApiPath sends /api straight here, bypassing the web
+        ## pod, so the controller needs its own way in.
+        - {{- toYaml .Values.networkPolicy.ingressControllerSelector | nindent 10 }}
+        {{- else if and .Values.ingress.enabled .Values.ingress.separateApiPath }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: {{ .Values.api.service.port }}
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 14 }}
+      ports:
+        - port: 7687
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 14 }}
+      ports:
+        - port: 11434
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+## neo4j: reachable only from inside the release.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirofish.neo4j.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- $sel | nindent 14 }}
+      ports:
+        - port: 7687
+          protocol: TCP
+        - port: 7474
+          protocol: TCP
+---
+## ollama: reachable only from inside the release. Egress stays open by
+## default so it can fetch model weights from the registry.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirofish.ollama.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 6 }}
+  policyTypes: [Ingress{{ if not .Values.networkPolicy.allowOllamaEgress }}, Egress{{ end }}]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- $sel | nindent 14 }}
+      ports:
+        - port: 11434
+          protocol: TCP
+  {{- if not .Values.networkPolicy.allowOllamaEgress }}
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+  {{- end }}
+{{- end }}

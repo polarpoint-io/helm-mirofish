@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mirofish.ollama.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ include "mirofish.ollama.headlessName" . }}
+  ## Model weights sit on a ReadWriteOnce volume, so this is single-instance.
+  ## For more inference throughput, put a bigger GPU behind it.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 8 }}
+        {{- with .Values.ollama.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.commonAnnotations .Values.ollama.podAnnotations }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.ollama.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- include "mirofish.podCommon" (dict "ctx" .) | nindent 6 }}
+      {{- with .Values.ollama.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- toYaml .Values.ollama.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ollama
+          image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.ollama.image) }}
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 11434
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: OLLAMA_MODELS
+              value: /root/.ollama/models
+            ## Persona generation and simulation rounds fan out many requests.
+            - name: OLLAMA_NUM_PARALLEL
+              value: "4"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "2"
+            ## Keep the chat model resident between simulation rounds.
+            - name: OLLAMA_KEEP_ALIVE
+              value: "30m"
+            {{- with .Values.ollama.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+          resources:
+            {{- $res := deepCopy .Values.ollama.resources }}
+            {{- if .Values.ollama.gpu.enabled }}
+            {{- $_ := set $res "limits" (merge (dict .Values.ollama.gpu.resourceName .Values.ollama.gpu.count) (default (dict) $res.limits)) }}
+            {{- end }}
+            {{- toYaml $res | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.ollama.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      {{- if not .Values.ollama.persistence.enabled }}
+      volumes:
+        - name: models
+          emptyDir: {}
+      {{- end }}
+      {{- $ns := merge (dict) .Values.ollama.nodeSelector (ternary .Values.ollama.gpu.nodeSelector (dict) .Values.ollama.gpu.enabled) }}
+      {{- with $ns }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $tols := concat .Values.ollama.tolerations (ternary .Values.ollama.gpu.tolerations (list) .Values.ollama.gpu.enabled) }}
+      {{- with $tols }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ollama.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.ollama.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: models
+        labels:
+          {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama") | nindent 10 }}
+        {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.ollama.persistence.annotations) }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.ollama.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.ollama.persistence.size | quote }}
+        {{- $sc := .Values.ollama.persistence.storageClass | default .Values.global.storageClass }}
+        {{- if $sc }}
+        {{- if (eq "-" $sc) }}
+        storageClassName: ""
+        {{- else }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        {{- end }}
+  {{- end }}

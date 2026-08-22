@@ -1,0 +1,42 @@
+# CPU-only deployment sized for a laptop-scale cluster.
+ollama:
+  gpu:
+    enabled: false
+  models:
+    chat: qwen2.5:7b
+    embedding: nomic-embed-text
+  persistence:
+    size: 30Gi
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      memory: 16Gi
+
+config:
+  llmModel: qwen2.5:7b
+
+api:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+neo4j:
+  auth:
+    password: change-me-please
+  heap:
+    initialSize: 256m
+    maxSize: 1g
+  pagecache:
+    size: 512m
+  persistence:
+    size: 10Gi
+
+web:
+  replicaCount: 1

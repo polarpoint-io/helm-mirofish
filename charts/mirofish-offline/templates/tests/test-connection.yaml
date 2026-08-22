@@ -1,0 +1,90 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "mirofish.suffixed" (dict "base" (include "mirofish.fullname" .) "suffix" "test-connection") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- include "mirofish.imagePullSecrets" . | nindent 2 }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.tests.image) }}
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          fail=0
+
+          check() {
+            name="$1"; url="$2"
+            printf '%-34s' "$name"
+            if curl -fsS --max-time 20 "$url" >/dev/null 2>&1; then
+              echo "OK"
+            else
+              echo "FAILED  ($url)"
+              fail=1
+            fi
+          }
+
+          # A model is resident only if /api/show answers for it by name;
+          # /api/tags succeeding just means Ollama is running.
+          #
+          # This is only a hard failure when the chart is responsible for
+          # loading models. With ollama.modelPull disabled, seeding the volume
+          # is the operator's job and its absence is reported, not failed.
+          check_model() {
+            name="$1"
+            printf '%-34s' "ollama model $name"
+            if curl -fsS --max-time 30 -X POST "{{ include "mirofish.ollama.url" . }}/api/show" \
+                 -H 'Content-Type: application/json' \
+                 -d "{\"model\":\"$name\"}" >/dev/null 2>&1; then
+              echo "OK"
+            else
+            {{- if .Values.ollama.modelPull.enabled }}
+              echo "NOT PRESENT (model pull still running?)"
+              fail=1
+            {{- else }}
+              echo "NOT PRESENT (modelPull is disabled - load it yourself)"
+            {{- end }}
+            fi
+          }
+
+          check "api /health"            "{{ include "mirofish.api.url" . }}/health"
+          check "web /healthz"           "http://{{ include "mirofish.web.fullname" . }}:{{ .Values.web.service.port }}/healthz"
+          check "web -> api proxy"       "http://{{ include "mirofish.web.fullname" . }}:{{ .Values.web.service.port }}/health"
+          check "ollama /api/version"    "{{ include "mirofish.ollama.url" . }}/api/version"
+          check_model "{{ .Values.config.llmModel }}"
+          check_model "{{ .Values.config.embeddingModel }}"
+
+          echo
+          echo "Models currently in Ollama:"
+          curl -fsS --max-time 20 "{{ include "mirofish.ollama.url" . }}/api/tags" || true
+          echo
+
+          exit "$fail"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+{{- end }}

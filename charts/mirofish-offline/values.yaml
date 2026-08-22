@@ -1,0 +1,419 @@
+# =============================================================================
+# MiroFish-Offline — Helm values
+# =============================================================================
+# This chart is self-contained: it always installs MiroFish (api + web),
+# Neo4j and Ollama. Nothing outside the cluster is required, and no cloud
+# API keys are used.
+#
+# Before a real install you MUST review, at minimum:
+#   * neo4j.auth.password        — defaults to the upstream demo password
+#   * ollama.gpu.enabled         — CPU inference on a 32B model is very slow
+#   * persistence sizes          — Ollama needs room for the models you pull
+#   * ingress.enabled / hosts    — how you reach the UI
+# =============================================================================
+
+nameOverride: ""
+fullnameOverride: ""
+
+## Applied to every workload in the chart.
+commonLabels: {}
+commonAnnotations: {}
+
+global:
+  ## Prefix for every image in the chart, this chart's own and the third-party
+  ## Neo4j/Ollama/curl images. Useful behind a pull-through mirror.
+  imageRegistry: ""
+  imagePullSecrets: []
+  ## StorageClass for every PersistentVolumeClaim unless overridden per
+  ## component. "" uses the cluster default; "-" disables dynamic provisioning.
+  storageClass: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+# -----------------------------------------------------------------------------
+# API — Flask backend (gunicorn)
+# -----------------------------------------------------------------------------
+api:
+  image:
+    registry: ghcr.io
+    repository: polarpoint-io/mirofish-offline-api
+    ## Defaults to the chart's appVersion.
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  ## Not configurable above 1. Simulation subprocesses and task progress are
+  ## held in the serving process, and uploads/ is a ReadWriteOnce volume, so a
+  ## second replica would serve inconsistent state. Scale the cluster, not this.
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 5001
+    annotations: {}
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+
+  ## The backend forks OASIS simulation workers, so give it room.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    failureThreshold: 60
+
+  ## Uploaded documents, generated personas, simulation output and reports.
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    size: 20Gi
+    annotations: {}
+    ## Bind to an existing claim instead of creating one.
+    existingClaim: ""
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  terminationGracePeriodSeconds: 120
+  ## Extra environment variables, e.g. tuning REPORT_AGENT_* knobs.
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  command: []
+  args: []
+
+# -----------------------------------------------------------------------------
+# Web — built Vue frontend served by nginx, proxying /api to the API Service
+# -----------------------------------------------------------------------------
+web:
+  image:
+    registry: ghcr.io
+    repository: polarpoint-io/mirofish-offline-web
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 80
+    ## Container port of the unprivileged nginx image.
+    targetPort: 8080
+    annotations: {}
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
+
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  extraEnv: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# -----------------------------------------------------------------------------
+# Neo4j — knowledge graph and agent memory store
+# -----------------------------------------------------------------------------
+neo4j:
+  image:
+    registry: docker.io
+    repository: neo4j
+    ## 5.26 is the current LTS line. The app needs >= 5.15.
+    tag: "5.26.29-community"
+    pullPolicy: IfNotPresent
+
+  auth:
+    username: neo4j
+    ## CHANGE THIS. Neo4j refuses passwords shorter than 8 characters.
+    password: "mirofish"
+    ## Read NEO4J_PASSWORD from an existing Secret instead of the value above.
+    existingSecret: ""
+    existingSecretPasswordKey: "neo4j-password"
+
+  ## APOC is required by the graph builder.
+  plugins: ["apoc"]
+
+  heap:
+    initialSize: 512m
+    maxSize: 2g
+  pagecache:
+    size: 1g
+
+  service:
+    type: ClusterIP
+    boltPort: 7687
+    httpPort: 7474
+    annotations: {}
+
+  ## The Neo4j Browser on :7474. Off by default — it is an admin console.
+  browser:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 4Gi
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    size: 50Gi
+    annotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 7474
+    runAsGroup: 7474
+    fsGroup: 7474
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  extraEnv: []
+
+# -----------------------------------------------------------------------------
+# Ollama — local LLM and embedding inference
+# -----------------------------------------------------------------------------
+ollama:
+  image:
+    registry: docker.io
+    repository: ollama/ollama
+    tag: "0.32.15"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 11434
+    annotations: {}
+
+  gpu:
+    ## Without a GPU, qwen2.5:32b is unusably slow. Either enable this on a
+    ## GPU node pool, or set models.chat to something much smaller.
+    enabled: false
+    ## Extended resource name — nvidia.com/gpu, amd.com/gpu, ...
+    resourceName: nvidia.com/gpu
+    count: 1
+    ## Added to nodeSelector when GPU is enabled.
+    nodeSelector: {}
+    ## Added to tolerations when GPU is enabled.
+    tolerations: []
+
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      memory: 32Gi
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    ## Model weights live here. qwen2.5:32b alone is ~20GB.
+    size: 100Gi
+    annotations: {}
+
+  ## Models the app expects. Names must match api.config.llmModel /
+  ## api.config.embeddingModel below.
+  models:
+    chat: "qwen2.5:32b"
+    embedding: "nomic-embed-text"
+    ## Any additional models to have available.
+    extra: []
+
+  ## Pulls the models above into the Ollama volume after install/upgrade.
+  ## Runs as a plain Job, not a Helm hook, so `helm install` returns
+  ## immediately instead of blocking on a multi-gigabyte download.
+  modelPull:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: curlimages/curl
+      tag: "8.21.0"
+      pullPolicy: IfNotPresent
+    backoffLimit: 3
+    ## 6 hours. A cold 32B pull on a slow link is not quick.
+    activeDeadlineSeconds: 21600
+    ttlSecondsAfterFinished: 3600
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: false
+    fsGroup: 0
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  extraEnv: []
+
+# -----------------------------------------------------------------------------
+# Application configuration (rendered into a ConfigMap + Secret for the API)
+# -----------------------------------------------------------------------------
+config:
+  ## Ollama speaks the OpenAI wire format; the key is required but unused.
+  llmApiKey: "ollama"
+  llmModel: "qwen2.5:32b"
+  embeddingModel: "nomic-embed-text"
+
+  ## Flask
+  ## Generated on first install and preserved across upgrades if left empty.
+  ## Set this (or config.existingSecret) when deploying through Argo CD or
+  ## Flux -- they render with `helm template`, where the chart cannot read
+  ## back the previous value and would mint a new key every reconcile.
+  secretKey: ""
+  debug: false
+
+  ## Read llmApiKey / secretKey from an existing Secret instead.
+  existingSecret: ""
+  existingSecretLlmApiKeyKey: "llm-api-key"
+  existingSecretFlaskSecretKeyKey: "flask-secret-key"
+
+# -----------------------------------------------------------------------------
+# Ingress — routes / to web and /api to the API
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: mirofish.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: mirofish-tls
+    #   hosts:
+    #     - mirofish.local
+
+  ## Send /api straight to the API Service rather than through nginx.
+  ## Off by default: the web container proxies /api itself, so one rule is
+  ## enough and the app works identically under `kubectl port-forward`.
+  separateApiPath: false
+
+# -----------------------------------------------------------------------------
+# Network policy — default-deny plus the flows this chart needs
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  ## Selectors allowed to reach the web Service (e.g. your ingress controller).
+  ingressControllerSelector: {}
+    # namespaceSelector:
+    #   matchLabels:
+    #     kubernetes.io/metadata.name: ingress-nginx
+  ## Ollama pulls models from the internet unless you mirror them.
+  allowOllamaEgress: true
+
+## Rendered by `helm test`.
+tests:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: curlimages/curl
+    tag: "8.21.0"
+    pullPolicy: IfNotPresent

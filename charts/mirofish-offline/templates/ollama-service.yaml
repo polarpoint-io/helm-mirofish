@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mirofish.ollama.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.ollama.service.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.ollama.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.ollama.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mirofish.ollama.headlessName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: http
+      port: {{ .Values.ollama.service.port }}
+      targetPort: http
+  selector:
+    {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}

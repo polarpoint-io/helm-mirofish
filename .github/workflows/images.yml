@@ -1,0 +1,173 @@
+name: images
+
+# Builds the two production images from the pinned upstream MiroFish-Offline
+# source and pushes them to GHCR under this repository's owner.
+#
+#   ghcr.io/<owner>/mirofish-offline-api
+#   ghcr.io/<owner>/mirofish-offline-web
+
+on:
+  push:
+    # No `paths:` filter here. GitHub applies path filters to tag pushes too,
+    # and a release commit typically touches Chart.yaml rather than docker/ --
+    # which would silently skip the very build the tag exists to trigger.
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "docker/**"
+      - "UPSTREAM_REF"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream ref to build (defaults to the pinned UPSTREAM_REF)"
+        required: false
+        type: string
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: nikmcfly/MiroFish-Offline
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            dockerfile: docker/api.Dockerfile
+          - component: web
+            dockerfile: docker/web.Dockerfile
+
+    steps:
+      - name: Checkout deployment repo
+        uses: actions/checkout@v4
+
+      - name: Resolve upstream ref
+        id: upstream
+        run: |
+          ref="${{ inputs.upstream_ref }}"
+          if [ -z "$ref" ]; then
+            ref="$(tr -d '[:space:]' < UPSTREAM_REF)"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Building against $UPSTREAM_REPO@$ref"
+
+      - name: Check out upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ steps.upstream.outputs.ref }}
+          path: upstream
+          persist-credentials: false
+
+      # Upstream's backend/uv.lock is stale (see docker/api.Dockerfile), so
+      # this repo vendors a regenerated one. Catch drift here rather than
+      # halfway through a 20-minute image build.
+      - name: Verify the vendored backend lockfile matches upstream
+        if: matrix.component == 'api'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p .relock
+          cp upstream/backend/pyproject.toml .relock/
+          cp docker/backend-uv.lock .relock/uv.lock
+          cd .relock
+          if ! uv lock --check; then
+            echo "::error::docker/backend-uv.lock is stale for UPSTREAM_REF. Run 'make relock' and commit the result."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirofish-offline-${{ matrix.component }}
+          tags: |
+            # A v<appVersion> tag produces the tag the chart defaults to.
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=MiroFish-Offline ${{ matrix.component }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            io.mirofish.upstream.repository=https://github.com/${{ env.UPSTREAM_REPO }}
+            io.mirofish.upstream.revision=${{ steps.upstream.outputs.ref }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # amd64 only: the backend pulls large ML wheels, and cross-building
+          # them under QEMU takes hours. Add linux/arm64 here if you need it.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Attestations produce an image index, which the runner's classic
+          # image store cannot hold -- so they are incompatible with `load`.
+          # Enable them only on the pushed builds.
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Smoke test the image
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          if [ "${{ matrix.component }}" = "web" ]; then
+            docker run -d --name smoke -p 18080:8080 "$image"
+            for i in $(seq 1 30); do
+              curl -fsS http://localhost:18080/healthz && break || sleep 2
+            done
+            curl -fsS http://localhost:18080/ | grep -qi "<html" 
+          else
+            # The API refuses to serve without Neo4j, so just prove the
+            # interpreter and dependency tree import cleanly.
+            docker run --rm --entrypoint python "$image" -c "import flask, neo4j, openai; print('imports ok')"
+          fi
+          docker rm -f smoke 2>/dev/null || true
+
+      - name: Report digest
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "### mirofish-offline-${{ matrix.component }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: ${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "tags:" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

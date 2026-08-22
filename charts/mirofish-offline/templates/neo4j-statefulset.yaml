@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mirofish.neo4j.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ include "mirofish.neo4j.headlessName" . }}
+  ## Community Edition is single-instance; clustering needs Enterprise.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 8 }}
+        {{- with .Values.neo4j.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.commonAnnotations .Values.neo4j.podAnnotations }}
+      annotations:
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.neo4j.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- include "mirofish.podCommon" (dict "ctx" .) | nindent 6 }}
+      {{- with .Values.neo4j.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        {{- toYaml .Values.neo4j.podSecurityContext | nindent 8 }}
+      containers:
+        - name: neo4j
+          image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.neo4j.image) }}
+          imagePullPolicy: {{ .Values.neo4j.image.pullPolicy }}
+          ports:
+            - name: bolt
+              containerPort: 7687
+              protocol: TCP
+            - name: http
+              containerPort: 7474
+              protocol: TCP
+          ## NEO4J_AUTH wants "user/password" as one string, but the password
+          ## comes from a Secret that may be user-supplied and password-only.
+          ## Compose it at start rather than templating the password in.
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              export NEO4J_AUTH="${DB_USER}/${DB_PASSWORD}"
+              exec tini -g -- /startup/docker-entrypoint.sh neo4j
+          env:
+            - name: DB_USER
+              value: {{ .Values.neo4j.auth.username | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mirofish.neo4j.secretName" . }}
+                  key: {{ include "mirofish.neo4j.secretPasswordKey" . }}
+            - name: NEO4J_PLUGINS
+              value: {{ toJson .Values.neo4j.plugins | quote }}
+            - name: NEO4J_server_memory_heap_initial__size
+              value: {{ .Values.neo4j.heap.initialSize | quote }}
+            - name: NEO4J_server_memory_heap_max__size
+              value: {{ .Values.neo4j.heap.maxSize | quote }}
+            - name: NEO4J_server_memory_pagecache_size
+              value: {{ .Values.neo4j.pagecache.size | quote }}
+            ## Bolt and HTTP must bind on all interfaces to be reachable from
+            ## other pods; the defaults are localhost-only in the image.
+            - name: NEO4J_server_default__listen__address
+              value: "0.0.0.0"
+            - name: NEO4J_server_bolt_listen__address
+              value: "0.0.0.0:7687"
+            - name: NEO4J_server_http_listen__address
+              value: "0.0.0.0:7474"
+            {{- with .Values.neo4j.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            tcpSocket:
+              port: bolt
+            periodSeconds: 10
+            ## Generous: first boot initialises the store and, on a large
+            ## existing database, recovery can take minutes.
+            failureThreshold: 60
+          livenessProbe:
+            tcpSocket:
+              port: bolt
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.neo4j.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.neo4j.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+        {{- if not .Values.neo4j.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.neo4j.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.neo4j.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.neo4j.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.neo4j.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "mirofish.componentLabels" (dict "ctx" . "component" "neo4j") | nindent 10 }}
+        {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.neo4j.persistence.annotations) }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.neo4j.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.neo4j.persistence.size | quote }}
+        {{- $sc := .Values.neo4j.persistence.storageClass | default .Values.global.storageClass }}
+        {{- if $sc }}
+        {{- if (eq "-" $sc) }}
+        storageClassName: ""
+        {{- else }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        {{- end }}
+  {{- end }}

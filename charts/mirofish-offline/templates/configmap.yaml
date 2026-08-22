@@ -1,0 +1,39 @@
+{{- include "mirofish.validateValues" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mirofish.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  ## ---- LLM (OpenAI-compatible, served by the bundled Ollama) ----
+  LLM_BASE_URL: {{ printf "%s/v1" (include "mirofish.ollama.url" .) | quote }}
+  LLM_MODEL_NAME: {{ .Values.config.llmModel | quote }}
+
+  ## CAMEL-AI / OASIS read the OPENAI_* names but point at the same server.
+  OPENAI_API_BASE_URL: {{ printf "%s/v1" (include "mirofish.ollama.url" .) | quote }}
+
+  ## ---- Embeddings ----
+  EMBEDDING_MODEL: {{ .Values.config.embeddingModel | quote }}
+  EMBEDDING_BASE_URL: {{ include "mirofish.ollama.url" . | quote }}
+
+  ## ---- Neo4j ----
+  NEO4J_URI: {{ include "mirofish.neo4j.uri" . | quote }}
+  NEO4J_USER: {{ .Values.neo4j.auth.username | quote }}
+
+  ## ---- Flask ----
+  FLASK_HOST: "0.0.0.0"
+  FLASK_PORT: {{ .Values.api.service.port | quote }}
+  FLASK_DEBUG: {{ .Values.config.debug | quote }}
+
+  ## Upstream also reads OASIS_DEFAULT_MAX_ROUNDS and the REPORT_AGENT_*
+  ## variables into its Config class, but nothing consumes them: rounds come
+  ## from the per-simulation request, and report_agent.py uses hardcoded class
+  ## constants. They are deliberately not exposed here rather than offered as
+  ## settings that quietly do nothing. Set them via api.extraEnv if a future
+  ## upstream version starts honouring them.

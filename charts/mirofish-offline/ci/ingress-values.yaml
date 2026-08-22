@@ -1,0 +1,17 @@
+# Ingress with TLS and a dedicated /api rule.
+ingress:
+  enabled: true
+  className: nginx
+  separateApiPath: true
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: mirofish.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mirofish-tls
+      hosts:
+        - mirofish.example.com

@@ -1,0 +1,77 @@
+{{- if .Values.ollama.modelPull.enabled }}
+{{- $models := concat (list .Values.ollama.models.chat .Values.ollama.models.embedding) .Values.ollama.models.extra | compact | uniq }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  ## Suffixed with the revision so an upgrade creates a new Job instead of
+  ## failing on a Job's immutable fields. The helper shortens the base rather
+  ## than the suffix, so the revision always survives.
+  name: {{ include "mirofish.modelPullJobName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "ollama-model-pull") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.ollama.modelPull.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.ollama.modelPull.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.ollama.modelPull.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama-model-pull") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "mirofish.podCommon" (dict "ctx" .) | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pull
+          image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.ollama.modelPull.image) }}
+          imagePullPolicy: {{ .Values.ollama.modelPull.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              OLLAMA="{{ include "mirofish.ollama.url" . }}"
+
+              echo "Waiting for Ollama at $OLLAMA ..."
+              until curl -fsS "$OLLAMA/api/version" >/dev/null 2>&1; do
+                sleep 5
+              done
+              echo "Ollama is up: $(curl -fsS "$OLLAMA/api/version")"
+
+              {{- range $models }}
+              echo "----------------------------------------------------------"
+              echo "Pulling {{ . }} (this can take a long time on a cold volume)"
+              # --no-buffer so pull progress streams into the pod log.
+              curl -fsS --no-buffer -X POST "$OLLAMA/api/pull" \
+                -H 'Content-Type: application/json' \
+                -d '{"model":"{{ . }}","stream":true}' \
+                | tail -c 4000
+              echo
+              # /api/pull streams a 200 even when the pull ends in an error,
+              # so confirm the model is actually resident before moving on.
+              curl -fsS -X POST "$OLLAMA/api/show" \
+                -H 'Content-Type: application/json' \
+                -d '{"model":"{{ . }}"}' >/dev/null
+              echo "OK: {{ . }} is available"
+              {{- end }}
+
+              echo "----------------------------------------------------------"
+              echo "All models present."
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.ollama.modelPull.resources | nindent 12 }}
+{{- end }}

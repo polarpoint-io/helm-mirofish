@@ -1,0 +1,71 @@
+# Rendered at container start by the nginx image entrypoint (envsubst).
+# ${API_UPSTREAM} and ${NGINX_LISTEN_PORT} are set by the Helm chart from
+# api.service.port and web.service.targetPort.
+
+server {
+    listen       ${NGINX_LISTEN_PORT};
+    server_name  _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # 50MB matches the backend's MAX_CONTENT_LENGTH for document uploads.
+    client_max_body_size 50m;
+
+    gzip              on;
+    gzip_vary         on;
+    gzip_min_length   1024;
+    gzip_proxied      any;
+    gzip_types        text/plain text/css text/javascript application/javascript
+                      application/json application/xml image/svg+xml;
+
+    # Liveness/readiness target for this container itself — never proxied.
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /api/ {
+        proxy_pass         ${API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+
+        # Ontology generation and report agent runs are long; the frontend
+        # itself allows 5 minutes per request.
+        proxy_connect_timeout  30s;
+        proxy_send_timeout     600s;
+        proxy_read_timeout     600s;
+
+        # Log streaming endpoints must not be buffered.
+        proxy_buffering off;
+    }
+
+    # Backend health, exposed for debugging through the same origin.
+    location = /health {
+        proxy_pass       ${API_UPSTREAM}/health;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+
+    # Hashed Vite assets are immutable.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # SPA history fallback.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+}

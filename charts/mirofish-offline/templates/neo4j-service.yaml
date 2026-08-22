@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mirofish.neo4j.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}
+  {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.neo4j.service.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.neo4j.service.type }}
+  ports:
+    - name: bolt
+      port: {{ .Values.neo4j.service.boltPort }}
+      targetPort: bolt
+      protocol: TCP
+    {{- if .Values.neo4j.browser.enabled }}
+    - name: http
+      port: {{ .Values.neo4j.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mirofish.neo4j.headlessName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: bolt
+      port: {{ .Values.neo4j.service.boltPort }}
+      targetPort: bolt
+    - name: http
+      port: {{ .Values.neo4j.service.httpPort }}
+      targetPort: http
+  selector:
+    {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "neo4j") | nindent 4 }}

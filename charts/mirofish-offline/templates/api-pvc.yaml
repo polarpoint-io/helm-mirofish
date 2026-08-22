@@ -1,0 +1,30 @@
+{{- if and .Values.api.persistence.enabled (not .Values.api.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "mirofish.api.pvcName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mirofish.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  annotations:
+    ## Projects, personas, simulations and reports are not reproducible; keep
+    ## the volume if the release is uninstalled.
+    helm.sh/resource-policy: keep
+    {{- with (mergeOverwrite (deepCopy .Values.commonAnnotations) .Values.api.persistence.annotations) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.api.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.api.persistence.size | quote }}
+  {{- $sc := .Values.api.persistence.storageClass | default .Values.global.storageClass }}
+  {{- if $sc }}
+  {{- if (eq "-" $sc) }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

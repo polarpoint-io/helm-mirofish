@@ -1,0 +1,25 @@
+# Local build scratch
+upstream/
+.relock/
+*.tgz
+charts/*/charts/
+charts/*/Chart.lock
+
+# Rendered output
+rendered/
+tmp/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets — never commit real values
+values.local.yaml
+*.secret.yaml
+.env
+
+# Stray runtime output from local tooling
+log/
+logs/

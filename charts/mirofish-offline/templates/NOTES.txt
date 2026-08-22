@@ -1,0 +1,88 @@
+{{ .Chart.Name }} {{ .Chart.Version }} — MiroFish-Offline {{ .Chart.AppVersion }}
+Release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Deployed:
+  api     {{ include "mirofish.api.fullname" . }}      (Flask + gunicorn, 1 replica)
+  web     {{ include "mirofish.web.fullname" . }}      (nginx, {{ if .Values.web.autoscaling.enabled }}{{ .Values.web.autoscaling.minReplicas }}-{{ .Values.web.autoscaling.maxReplicas }} replicas, autoscaled{{ else }}{{ .Values.web.replicaCount }} replica(s){{ end }})
+  neo4j   {{ include "mirofish.neo4j.fullname" . }}    ({{ .Values.neo4j.image.tag }})
+  ollama  {{ include "mirofish.ollama.fullname" . }}   ({{ if .Values.ollama.gpu.enabled }}{{ .Values.ollama.gpu.count }} x {{ .Values.ollama.gpu.resourceName }}{{ else }}CPU only{{ end }})
+
+--------------------------------------------------------------------------
+1. Reach the UI
+--------------------------------------------------------------------------
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+{{- $scheme := "http" }}
+{{- range $.Values.ingress.tls }}{{ if has $host.host .hosts }}{{ $scheme = "https" }}{{ end }}{{ end }}
+  {{ $scheme }}://{{ $host.host }}{{ (first $host.paths).path }}
+{{- end }}
+{{- else if eq .Values.web.service.type "LoadBalancer" }}
+  Watch for the external address:
+
+    kubectl get svc -n {{ .Release.Namespace }} -w {{ include "mirofish.web.fullname" . }}
+{{- else }}
+  No Ingress is enabled, so forward the web Service:
+
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "mirofish.web.fullname" . }} 8080:{{ .Values.web.service.port }}
+
+  then open http://localhost:8080
+{{- end }}
+
+--------------------------------------------------------------------------
+2. Wait for the models
+--------------------------------------------------------------------------
+{{- if .Values.ollama.modelPull.enabled }}
+The chart is downloading {{ .Values.ollama.models.chat }} and {{ .Values.ollama.models.embedding }} into
+the Ollama volume in the background. Until that finishes, graph building and
+simulation will fail with model-not-found errors.
+
+  kubectl logs -n {{ .Release.Namespace }} -f job/{{ include "mirofish.modelPullJobName" . }}
+
+{{ .Values.ollama.models.chat }} is a large download; on a cold volume expect this to take a while.
+{{- else }}
+Automatic model pulling is disabled. Load the models yourself before use:
+
+  kubectl exec -n {{ .Release.Namespace }} sts/{{ include "mirofish.ollama.fullname" . }} -- ollama pull {{ .Values.ollama.models.chat }}
+  kubectl exec -n {{ .Release.Namespace }} sts/{{ include "mirofish.ollama.fullname" . }} -- ollama pull {{ .Values.ollama.models.embedding }}
+{{- end }}
+
+--------------------------------------------------------------------------
+3. Verify
+--------------------------------------------------------------------------
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if not .Values.ollama.gpu.enabled }}
+
+--------------------------------------------------------------------------
+Warning: GPU is disabled
+--------------------------------------------------------------------------
+Ollama is running on CPU. {{ .Values.ollama.models.chat }} on CPU is slow enough that a
+multi-agent simulation may take hours. Either schedule Ollama onto a GPU node:
+
+  --set ollama.gpu.enabled=true
+
+or pick a smaller model:
+
+  --set ollama.models.chat=qwen2.5:7b --set config.llmModel=qwen2.5:7b
+{{- end }}
+{{- if and (not .Values.neo4j.auth.existingSecret) (eq .Values.neo4j.auth.password "mirofish") }}
+
+--------------------------------------------------------------------------
+Warning: default Neo4j password
+--------------------------------------------------------------------------
+neo4j.auth.password is still the upstream demo value. Set your own, or point
+neo4j.auth.existingSecret at a Secret you manage.
+{{- end }}
+{{- if ne .Values.config.llmModel .Values.ollama.models.chat }}
+
+--------------------------------------------------------------------------
+Warning: model mismatch
+--------------------------------------------------------------------------
+config.llmModel ({{ .Values.config.llmModel }}) is not the model being pulled into
+Ollama ({{ .Values.ollama.models.chat }}). Requests will fail until both agree.
+{{- end }}
+{{- if ne .Values.config.embeddingModel .Values.ollama.models.embedding }}
+
+Warning: config.embeddingModel ({{ .Values.config.embeddingModel }}) does not match
+ollama.models.embedding ({{ .Values.ollama.models.embedding }}).
+{{- end }}

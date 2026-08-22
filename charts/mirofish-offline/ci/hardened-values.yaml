@@ -1,0 +1,37 @@
+# Network policies on, autoscaling and disruption budget for the web tier,
+# externally managed secrets, private registry.
+networkPolicy:
+  enabled: true
+  ingressControllerSelector:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ingress-nginx
+  # Ollama cannot reach the model registry with egress closed, so the pull
+  # Job is disabled here too; this profile assumes a pre-seeded volume.
+  allowOllamaEgress: false
+
+ollama:
+  modelPull:
+    enabled: false
+
+web:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+config:
+  existingSecret: mirofish-app-secrets
+neo4j:
+  auth:
+    existingSecret: mirofish-neo4j
+    existingSecretPasswordKey: password
+
+global:
+  imageRegistry: registry.internal.example.com
+  imagePullSecrets:
+    - internal-registry
+  storageClass: fast-ssd
