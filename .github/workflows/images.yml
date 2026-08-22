@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout deployment repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve upstream ref
         id: upstream
@@ -67,7 +67,7 @@ jobs:
           echo "Building against $UPSTREAM_REPO@$ref"
 
       - name: Check out upstream source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ steps.upstream.outputs.ref }}
