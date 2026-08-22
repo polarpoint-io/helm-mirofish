@@ -4,6 +4,8 @@ Deploys [MiroFish-Offline](https://github.com/nikmcfly/MiroFish-Offline) togethe
 
 Two things still reach outside the cluster: Ollama downloads model weights on first start (see `ollama.modelPull`), and upstream's `index.html` loads webfonts from `fonts.googleapis.com`, so the UI falls back to system fonts on an air-gapped network.
 
+To use an Ollama you already run instead of the bundled one, see [Using an external Ollama](#using-an-external-ollama).
+
 ## Installing
 
 ```bash
@@ -99,6 +101,8 @@ helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
 
 | Key | Default | Description |
 |---|---|---|
+| `ollama.enabled` | `true` | Set `false` to use an Ollama you already run. Drops the StatefulSet, Services, PVC and NetworkPolicy. |
+| `ollama.externalUrl` | `""` | Required when `enabled` is `false`. Scheme and port, no trailing slash — the chart appends `/v1` itself. The render fails without it. |
 | `ollama.image.registry` / `.repository` / `.tag` / `.pullPolicy` | `docker.io` / `ollama/ollama` / `0.32.15` / `IfNotPresent` | |
 | `ollama.gpu.enabled` | `false` | Turn this on for any real workload. |
 | `ollama.gpu.resourceName` / `.count` | `nvidia.com/gpu` / `1` | |
@@ -106,7 +110,7 @@ helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
 | `ollama.models.chat` | `qwen2.5:32b` | Must match `config.llmModel`. |
 | `ollama.models.embedding` | `nomic-embed-text` | Must match `config.embeddingModel`. |
 | `ollama.models.extra` | `[]` | Additional models to pull. |
-| `ollama.modelPull.enabled` | `true` | Pulls the models after install/upgrade via a plain Job, so `helm install` does not block on a multi-gigabyte download. |
+| `ollama.modelPull.enabled` | `true` | Pulls the models after install/upgrade via a plain Job, so `helm install` does not block on a multi-gigabyte download. Ignored when `ollama.enabled` is `false` — the chart will not push weights into a server it does not manage. |
 | `ollama.modelPull.image.*` | `docker.io/curlimages/curl:8.21.0` | |
 | `ollama.modelPull.backoffLimit` / `.activeDeadlineSeconds` / `.ttlSecondsAfterFinished` / `.resources` | `3` / `21600` / `3600` / small | |
 | `ollama.service.type` / `.port` | `ClusterIP` / `11434` | |
@@ -140,6 +144,7 @@ Rendered into a ConfigMap and a Secret consumed by the API.
 | `networkPolicy.enabled` | `false` | Restricts each component to the flows it actually needs. |
 | `networkPolicy.ingressControllerSelector` | `{}` | Who may reach the web tier. Empty means any namespace. |
 | `networkPolicy.allowOllamaEgress` | `true` | Ollama needs egress to download models unless the volume is pre-seeded. |
+| `networkPolicy.extraApiEgress` | `[]` | Extra egress rules for the API pod. Required when `ollama.enabled` is `false` — the in-cluster rule that reached the bundled Ollama no longer exists. |
 | `tests.enabled` | `true` | Render the `helm test` pod. |
 | `tests.image.*` | `docker.io/curlimages/curl:8.21.0` | |
 
@@ -155,6 +160,7 @@ Rendered into a ConfigMap and a Secret consumed by the API.
 | `ingress-values.yaml` | Ingress with TLS and a separate `/api` rule. |
 | `hardened-values.yaml` | Network policies, autoscaling, external secrets, private registry. |
 | `ephemeral-values.yaml` | No persistence, no model pull — smoke tests. |
+| `external-ollama-values.yaml` | Inference from an Ollama running outside the chart. |
 
 ## Testing an install
 
@@ -176,3 +182,26 @@ config:
 ```
 
 The same applies to `neo4j.auth.password`, which should come from `neo4j.auth.existingSecret` in any environment you care about.
+
+## Using an external Ollama
+
+The chart bundles Ollama by default, but any OpenAI-compatible Ollama reachable from the cluster will do — one in another namespace, on another cluster, or on a workstation with a GPU you would rather not replicate.
+
+```yaml
+ollama:
+  enabled: false
+  externalUrl: "http://10.0.0.42:11434"
+```
+
+That drops the Ollama StatefulSet, its two Services, its PVC and its NetworkPolicy, and points `LLM_BASE_URL`, `OPENAI_API_BASE_URL` and `EMBEDDING_BASE_URL` at your server instead. `ci/external-ollama-values.yaml` is a complete example.
+
+Four things to get right:
+
+1. **The remote server must listen on more than loopback.** Ollama binds `127.0.0.1:11434` by default, which is reachable only from that machine. Start it with `OLLAMA_HOST=0.0.0.0:11434`.
+2. **The models must already be there.** The chart will not pull into a server it does not manage, whatever `ollama.modelPull.enabled` says. Run `ollama pull` on that host, and keep `config.llmModel` and `config.embeddingModel` matching what it actually has — `curl <externalUrl>/api/tags` shows you.
+3. **Open a path for the API pod** if `networkPolicy.enabled` is `true`. The rule that reached the bundled Ollama is gone and the chart cannot guess the replacement, so supply one through `networkPolicy.extraApiEgress`. The install notes warn when this is missing.
+4. **Mind the latency.** A simulation makes one LLM call per agent per round — thousands per run. A link that adds 50ms per call adds minutes per round. Same-cluster or same-LAN is fine; across a WAN is not.
+
+`helm test` still checks the external server answers and reports whether each model is present, so it is a quick way to confirm the wiring before running anything real.
+
+Neo4j is not configurable this way — it is always bundled. Say so if you need the same treatment for it.

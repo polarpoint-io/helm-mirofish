@@ -1,3 +1,9 @@
+<div align="center">
+
+<img src="./static/hero.png" alt="Helm MiroFish — MiroFish-Offline on Kubernetes" width="100%"/>
+
+</div>
+
 # helm-mirofish
 
 Kubernetes deployment for [MiroFish-Offline](https://github.com/nikmcfly/MiroFish-Offline) — a multi-agent swarm-intelligence engine that simulates public reaction to a document, running entirely on local models.
@@ -32,7 +38,19 @@ kubectl port-forward -n mirofish svc/mirofish-mirofish-offline-web 8080:80
 
 Open <http://localhost:8080>.
 
-Without a GPU, use a smaller model instead — `qwen2.5:32b` on CPU will not finish a simulation in reasonable time:
+Already running Ollama somewhere — another namespace, another cluster, a workstation with a GPU? Point the chart at it instead of deploying another:
+
+```bash
+helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
+  --namespace mirofish --create-namespace \
+  --set neo4j.auth.password='<something-you-choose>' \
+  --set ollama.enabled=false \
+  --set ollama.externalUrl=http://10.0.0.42:11434
+```
+
+That drops the Ollama StatefulSet, its Services and its PVC. The [chart README](./charts/mirofish-offline/README.md#using-an-external-ollama) covers the four things that usually go wrong — chiefly that Ollama binds loopback by default and needs `OLLAMA_HOST=0.0.0.0:11434` to be reachable at all.
+
+Without a GPU and without an external server, use a smaller model — `qwen2.5:32b` on CPU will not finish a simulation in reasonable time:
 
 ```bash
 helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
@@ -60,6 +78,9 @@ helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
               │StatefulSet│ │StatefulSet │  PVC: model weights
               │ PVC: data │ │ optional GPU│
               └──────────┘  └────────────┘
+                                  ▲
+                       ollama.enabled=false swaps
+                       this for any URL you supply
                                   ▲
                             ┌─────┴──────┐
                             │ model-pull │  Job, pulls chat + embedding
@@ -91,6 +112,10 @@ docs/
   operations.md              upgrades, backup, troubleshooting
   architecture.md            why the chart is shaped this way
 UPSTREAM_REF                 upstream commit the images are built from
+hack/
+  check-names.py             object-name uniqueness and length sweep
+  build-hero.py              regenerates static/hero.png (`make hero`)
+static/hero.png              README banner
 Makefile                     build, lint, validate, install
 ```
 
@@ -116,7 +141,7 @@ The API image is large — roughly 8GB, dominated by the ML stack `camel-ai` pul
 | Images | Push to `main` touching `docker/` or `UPSTREAM_REF`, or a `v*` tag. Published to `ghcr.io/polarpoint-io/mirofish-offline-{api,web}`. |
 | Chart | A `chart-v<semver>` tag matching `Chart.yaml`'s `version`. Published to `oci://ghcr.io/polarpoint-io/charts/mirofish-offline`. |
 
-The two tags are separate on purpose: `v0.2.0` versions the application images, `chart-v0.1.0` versions the packaging. Because the chart defaults its image tag to `appVersion`, bumping `appVersion` means pushing a matching `v*` tag, or the default install will not find an image.
+The two tags are separate on purpose: `v0.2.0` versions the application images, `chart-v0.2.0` versions the packaging. Because the chart defaults its image tag to `appVersion`, bumping `appVersion` means pushing a matching `v*` tag, or the default install will not find an image.
 
 To pick up new upstream code:
 

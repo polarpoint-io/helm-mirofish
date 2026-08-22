@@ -79,6 +79,15 @@ kubectl rollout restart -n mirofish deploy/mirofish-mirofish-offline-api
 
 The init container normally prevents this; it only shows up if Neo4j was restarted or repaired underneath a running API pod.
 
+### External Ollama: connection refused or timeouts
+
+```bash
+kubectl run -n mirofish curl --rm -it --image=curlimages/curl --restart=Never -- \
+  curl -v --max-time 10 http://10.0.0.42:11434/api/version
+```
+
+Connection refused from inside the cluster but fine on the host itself means Ollama is bound to loopback — restart it with `OLLAMA_HOST=0.0.0.0:11434`. A hang instead of a refusal usually means a NetworkPolicy: check `networkPolicy.extraApiEgress` covers the address and port.
+
 ### "model not found"
 
 The pull Job has not finished, or the model names disagree.

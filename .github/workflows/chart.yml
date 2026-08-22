@@ -22,11 +22,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 
@@ -45,9 +45,9 @@ jobs:
   render:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 
@@ -92,6 +92,7 @@ jobs:
           expect_failure "--set neo4j.auth.password=short"
           expect_failure "--set ollama.gpu.enabled=true --set ollama.gpu.count=0"
           expect_failure "--set web.service.targetPort=80"
+          expect_failure "--set ollama.enabled=false"
 
       - name: Render scenario files together, not just one at a time
         run: |

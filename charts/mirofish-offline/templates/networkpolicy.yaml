@@ -79,6 +79,7 @@ spec:
       ports:
         - port: 7687
           protocol: TCP
+    {{- if .Values.ollama.enabled }}
     - to:
         - podSelector:
             matchLabels:
@@ -86,6 +87,14 @@ spec:
       ports:
         - port: 11434
           protocol: TCP
+    {{- else }}
+    ## Ollama is external, so the in-cluster rule above does not apply and the
+    ## chart cannot guess the address. Supply the reachable range yourself in
+    ## networkPolicy.extraApiEgress, or the API will be unable to reach it.
+    {{- end }}
+    {{- with .Values.networkPolicy.extraApiEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
     - ports:
         - port: 53
           protocol: UDP
@@ -115,6 +124,7 @@ spec:
           protocol: TCP
         - port: 7474
           protocol: TCP
+{{- if .Values.ollama.enabled }}
 ---
 ## ollama: reachable only from inside the release. Egress stays open by
 ## default so it can fetch model weights from the registry.
@@ -146,4 +156,5 @@ spec:
         - port: 53
           protocol: TCP
   {{- end }}
+{{- end }}
 {{- end }}

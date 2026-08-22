@@ -1,3 +1,4 @@
+{{- if .Values.ollama.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -35,3 +36,4 @@ spec:
       targetPort: http
   selector:
     {{- include "mirofish.componentSelectorLabels" (dict "ctx" . "component" "ollama") | nindent 4 }}
+{{- end }}

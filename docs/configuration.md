@@ -25,6 +25,16 @@ ollama:
     extra: ["llama3.1:8b", "mistral:7b"]
 ```
 
+## Using an Ollama on another host
+
+```yaml
+ollama:
+  enabled: false
+  externalUrl: "http://10.0.0.42:11434"
+```
+
+The Ollama StatefulSet, Services, PVC and NetworkPolicy are dropped, and the app is pointed at your server. Full detail, including the four things that usually go wrong, is in the [chart README](../charts/mirofish-offline/README.md#using-an-external-ollama). The short version: the remote server needs `OLLAMA_HOST=0.0.0.0:11434`, the models must already be pulled there, `networkPolicy.extraApiEgress` must permit the route if network policies are on, and the link wants to be low-latency because a simulation makes thousands of calls.
+
 ## Pre-seeding models instead of downloading them
 
 If cluster egress is restricted, point the Ollama volume at a pre-populated PVC and disable the pull Job:

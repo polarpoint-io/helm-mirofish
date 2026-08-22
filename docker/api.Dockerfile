@@ -15,13 +15,18 @@
 ARG PYTHON_VERSION=3.11
 ARG UV_VERSION=0.9.26
 
+# A variable is only expanded in an image reference on a FROM line, never in
+# a `COPY --from=` stage name -- BuildKit resolves those before build args and
+# rejects the literal "${UV_VERSION}". Naming the stage here is what makes the
+# version a single ARG rather than a hardcoded tag in two places.
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # --------------------------------------------------------------------------
 # Builder — resolve the locked dependency set into /app/backend/.venv
 # --------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
-ARG UV_VERSION
 
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \

@@ -54,11 +54,11 @@ spec:
                  -d "{\"model\":\"$name\"}" >/dev/null 2>&1; then
               echo "OK"
             else
-            {{- if .Values.ollama.modelPull.enabled }}
+            {{- if and .Values.ollama.modelPull.enabled .Values.ollama.enabled }}
               echo "NOT PRESENT (model pull still running?)"
               fail=1
             {{- else }}
-              echo "NOT PRESENT (modelPull is disabled - load it yourself)"
+              echo "NOT PRESENT (not pulled by this chart - load it yourself)"
             {{- end }}
             fi
           }

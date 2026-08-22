@@ -1,4 +1,9 @@
-{{- if .Values.ollama.modelPull.enabled }}
+{{- /*
+Only ever pulls into the Ollama this chart deployed. Pointing at someone
+else's server and silently pushing 20GB of weights into it is not a default
+worth having; seed an external server yourself.
+*/ -}}
+{{- if and .Values.ollama.modelPull.enabled .Values.ollama.enabled }}
 {{- $models := concat (list .Values.ollama.models.chat .Values.ollama.models.embedding) .Values.ollama.models.extra | compact | uniq }}
 apiVersion: batch/v1
 kind: Job

@@ -5,7 +5,11 @@ Deployed:
   api     {{ include "mirofish.api.fullname" . }}      (Flask + gunicorn, 1 replica)
   web     {{ include "mirofish.web.fullname" . }}      (nginx, {{ if .Values.web.autoscaling.enabled }}{{ .Values.web.autoscaling.minReplicas }}-{{ .Values.web.autoscaling.maxReplicas }} replicas, autoscaled{{ else }}{{ .Values.web.replicaCount }} replica(s){{ end }})
   neo4j   {{ include "mirofish.neo4j.fullname" . }}    ({{ .Values.neo4j.image.tag }})
+{{- if .Values.ollama.enabled }}
   ollama  {{ include "mirofish.ollama.fullname" . }}   ({{ if .Values.ollama.gpu.enabled }}{{ .Values.ollama.gpu.count }} x {{ .Values.ollama.gpu.resourceName }}{{ else }}CPU only{{ end }})
+{{- else }}
+  ollama  external, at {{ .Values.ollama.externalUrl }} (not deployed by this chart)
+{{- end }}
 
 --------------------------------------------------------------------------
 1. Reach the UI
@@ -31,7 +35,17 @@ Deployed:
 --------------------------------------------------------------------------
 2. Wait for the models
 --------------------------------------------------------------------------
-{{- if .Values.ollama.modelPull.enabled }}
+{{- if not .Values.ollama.enabled }}
+Inference comes from {{ .Values.ollama.externalUrl }}, which this chart does not
+manage. {{ .Values.config.llmModel }} and {{ .Values.config.embeddingModel }} must already be loaded there:
+
+  curl {{ .Values.ollama.externalUrl }}/api/tags
+
+If they are missing, pull them on that host:
+
+  ollama pull {{ .Values.config.llmModel }}
+  ollama pull {{ .Values.config.embeddingModel }}
+{{- else if .Values.ollama.modelPull.enabled }}
 The chart is downloading {{ .Values.ollama.models.chat }} and {{ .Values.ollama.models.embedding }} into
 the Ollama volume in the background. Until that finishes, graph building and
 simulation will fail with model-not-found errors.
@@ -51,7 +65,16 @@ Automatic model pulling is disabled. Load the models yourself before use:
 --------------------------------------------------------------------------
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-{{- if not .Values.ollama.gpu.enabled }}
+{{- if and (not .Values.ollama.enabled) .Values.networkPolicy.enabled (not .Values.networkPolicy.extraApiEgress) }}
+
+--------------------------------------------------------------------------
+Warning: external Ollama with no egress rule
+--------------------------------------------------------------------------
+networkPolicy is on and ollama is external, but networkPolicy.extraApiEgress
+is empty -- the API pod has no rule permitting it to reach
+{{ .Values.ollama.externalUrl }}. Every LLM call will time out.
+{{- end }}
+{{- if and .Values.ollama.enabled (not .Values.ollama.gpu.enabled) }}
 
 --------------------------------------------------------------------------
 Warning: GPU is disabled

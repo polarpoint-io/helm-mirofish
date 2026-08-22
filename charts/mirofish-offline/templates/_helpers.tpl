@@ -126,7 +126,11 @@ pass can shave off the component word that made the names differ -- e.g.
 {{- end -}}
 
 {{- define "mirofish.ollama.url" -}}
+{{- if .Values.ollama.enabled -}}
 {{- printf "http://%s:%v" (include "mirofish.ollama.fullname" .) .Values.ollama.service.port -}}
+{{- else -}}
+{{- trimSuffix "/" .Values.ollama.externalUrl -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "mirofish.api.url" -}}
@@ -205,6 +209,12 @@ automountServiceAccountToken: {{ .ctx.Values.serviceAccount.automountServiceAcco
 {{- end -}}
 {{- if and .Values.ollama.gpu.enabled (lt (int .Values.ollama.gpu.count) 1) -}}
 {{- fail "ollama.gpu.count must be >= 1 when ollama.gpu.enabled is true." -}}
+{{- end -}}
+{{- if and (not .Values.ollama.enabled) (not .Values.ollama.externalUrl) -}}
+{{- fail "ollama.externalUrl is required when ollama.enabled is false: nothing would be serving inference." -}}
+{{- end -}}
+{{- if and (not .Values.ollama.enabled) (not (or (hasPrefix "http://" .Values.ollama.externalUrl) (hasPrefix "https://" .Values.ollama.externalUrl))) -}}
+{{- fail "ollama.externalUrl must include a scheme, e.g. http://10.0.0.42:11434" -}}
 {{- end -}}
 {{- if lt (int .Values.web.service.targetPort) 1024 -}}
 {{- fail "web.service.targetPort must be >= 1024: the web image runs nginx as an unprivileged user, which cannot bind a privileged port." -}}

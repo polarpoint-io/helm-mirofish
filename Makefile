@@ -104,7 +104,8 @@ validate-negative: ## Confirm the chart rejects values it cannot support
 	for args in "--set api.replicaCount=3" \
 	            "--set neo4j.auth.password=short" \
 	            "--set ollama.gpu.enabled=true --set ollama.gpu.count=0" \
-	            "--set web.service.targetPort=80"; do \
+	            "--set web.service.targetPort=80" \
+	            "--set ollama.enabled=false"; do \
 	  if helm template bad $(CHART) $$args >/dev/null 2>&1; then \
 	    echo "FAIL: expected '$$args' to be rejected"; exit 1; \
 	  fi; \
@@ -155,6 +156,10 @@ port-forward: ## Forward the web UI to http://localhost:8080
 logs: ## Tail the API logs
 	kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/component=api -f --tail=200
 
+.PHONY: hero
+hero: ## Regenerate static/hero.png (needs node + playwright and PIL)
+	python3 hack/build-hero.py
+
 .PHONY: clean
 clean: ## Remove build scratch
-	rm -rf dist rendered .relock
+	rm -rf dist rendered .relock .hero-build

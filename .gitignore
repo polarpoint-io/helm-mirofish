@@ -23,3 +23,6 @@ values.local.yaml
 # Stray runtime output from local tooling
 log/
 logs/
+
+# Hero image build scratch
+.hero-build/

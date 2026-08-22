@@ -267,6 +267,21 @@ neo4j:
 # Ollama — local LLM and embedding inference
 # -----------------------------------------------------------------------------
 ollama:
+  ## Set false to use an Ollama you already run -- on another host, in another
+  ## namespace, or behind a gateway -- instead of the bundled one. The
+  ## StatefulSet, its Services, its PVC and its NetworkPolicy are all dropped;
+  ## externalUrl below becomes the only thing the app talks to.
+  enabled: true
+
+  ## Required when enabled is false. Include the scheme and port, no trailing
+  ## slash. The chart appends /v1 for the OpenAI-compatible endpoints itself.
+  ##   in-cluster, another namespace:  http://ollama.ai.svc.cluster.local:11434
+  ##   a machine on the network:       http://10.0.0.42:11434
+  ##   behind a gateway:               https://ollama.internal.example.com
+  ## The remote server must accept connections from outside its own host --
+  ## Ollama binds 127.0.0.1 by default, so it needs OLLAMA_HOST=0.0.0.0:11434.
+  externalUrl: ""
+
   image:
     registry: docker.io
     repository: ollama/ollama
@@ -316,6 +331,9 @@ ollama:
   ## Pulls the models above into the Ollama volume after install/upgrade.
   ## Runs as a plain Job, not a Helm hook, so `helm install` returns
   ## immediately instead of blocking on a multi-gigabyte download.
+  ##
+  ## This works against an external server too, but it mutates it -- turn it
+  ## off when pointing at an Ollama you do not own.
   modelPull:
     enabled: true
     image:
@@ -408,6 +426,17 @@ networkPolicy:
     #     kubernetes.io/metadata.name: ingress-nginx
   ## Ollama pulls models from the internet unless you mirror them.
   allowOllamaEgress: true
+  ## Extra egress rules for the API pod. Required when ollama.enabled is
+  ## false: the in-cluster rule that let the API reach the bundled Ollama no
+  ## longer exists, and this chart cannot guess where yours lives.
+  ##   extraApiEgress:
+  ##     - to:
+  ##         - ipBlock:
+  ##             cidr: 10.0.0.42/32
+  ##       ports:
+  ##         - port: 11434
+  ##           protocol: TCP
+  extraApiEgress: []
 
 ## Rendered by `helm test`.
 tests:

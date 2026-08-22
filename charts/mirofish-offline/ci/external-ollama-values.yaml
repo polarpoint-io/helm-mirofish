@@ -1,0 +1,21 @@
+# Inference from an Ollama running outside this chart -- another namespace,
+# another cluster, or a machine on the network. Everything else is bundled
+# as usual.
+ollama:
+  enabled: false
+  externalUrl: "http://10.0.0.42:11434"
+
+config:
+  llmModel: qwen2.5:14b
+  embeddingModel: nomic-embed-text
+
+networkPolicy:
+  enabled: true
+  # Without this the API pod cannot reach the external server at all.
+  extraApiEgress:
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.42/32
+      ports:
+        - port: 11434
+          protocol: TCP
