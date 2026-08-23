@@ -20,7 +20,7 @@ helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
 |---|---|
 | Kubernetes | >= 1.25 |
 | Storage | A default StorageClass, or set `global.storageClass`. ~170Gi across three PVCs at default sizes. |
-| Image tag | The chart defaults to `appVersion` (`0.2.0`). Publishing that tag requires a `v0.2.0` git tag in this repo — see the repository README. |
+| Image tag | Defaults to the chart `version`, which semantic-release sets and which is also the tag of the images built from that release. |
 | Compute | ~4 CPU / 12Gi requested at defaults, before the GPU. |
 | GPU | Strongly recommended. `qwen2.5:32b` on CPU is too slow to be usable for simulations. |
 | Egress | Ollama downloads model weights on first start unless you pre-seed the volume. |
@@ -47,7 +47,7 @@ helm install mirofish oci://ghcr.io/polarpoint-io/charts/mirofish-offline \
 
 | Key | Default | Description |
 |---|---|---|
-| `api.image.registry` / `.repository` / `.tag` / `.digest` | `ghcr.io` / `polarpoint-io/mirofish-offline-api` / `""` / `""` | Empty tag means the chart's `appVersion`. |
+| `api.image.registry` / `.repository` / `.tag` / `.digest` | `ghcr.io` / `polarpoint-io/mirofish-offline-api` / `""` / `""` | Empty tag means the chart's own `version` — the images are built from the same release. |
 | `api.image.pullPolicy` | `IfNotPresent` | |
 | `api.replicaCount` | `1` | **Must be 1.** Any other value fails the render — see [architecture](../../docs/architecture.md). |
 | `api.service.type` / `.port` | `ClusterIP` / `5001` | |

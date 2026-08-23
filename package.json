@@ -1,0 +1,17 @@
+{
+  "name": "helm-mirofish",
+  "version": "0.0.0-semantically-released",
+  "private": true,
+  "description": "Kubernetes deployment for MiroFish-Offline: Helm chart, production images, and CI",
+  "dependencies": {
+    "@commitlint/cli": "^12.1.1",
+    "@commitlint/config-conventional": "^12.1.1"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.2",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "semantic-release": "^19.0.5",
+    "semantic-release-helm3": "^2.10.0"
+  }
+}

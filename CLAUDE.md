@@ -29,11 +29,11 @@ If `$REPO/UPSTREAM_REF` changed, also run `make -C "$REPO" relock` then `make -C
 - **gunicorn must be installed *after* the last `uv sync`.** `uv sync` is exact by default and prunes anything absent from the lockfile, so installing earlier leaves the image without the binary its `CMD` invokes. `$REPO/docker/api.Dockerfile` has a build-time assertion for this.
 - **`COPY --from=` cannot take a variable stage name.** BuildKit resolves stage names before build args. Pull versioned images in as a named `FROM ... AS` stage instead.
 
-## Release tags
+## Releases
 
-Two schemes, deliberately separate:
+Driven by semantic-release from conventional commits on `main`, like the rest of the estate. **Never edit `version:` in `$REPO/charts/mirofish-offline/Chart.yaml` by hand** — semantic-release owns it, and a manual edit is either overwritten or produces a version nothing else agrees with.
 
-- `v<appVersion>` builds and publishes the application images to GHCR. The chart defaults its image tag to `appVersion`, so bumping `appVersion` without pushing a matching `v*` tag leaves a default install with no image to pull.
-- `chart-v<version>` publishes the chart, and must match `version:` in `$REPO/charts/mirofish-offline/Chart.yaml` or the release workflow fails.
-
-Bump `version:` in `Chart.yaml` for any change under `$REPO/charts/`.
+- `fix:` patch, `feat:` minor, `feat!:` or a `BREAKING CHANGE:` footer major. `chore:`/`docs:`/`ci:` release nothing.
+- The `v<version>` tag semantic-release pushes is what builds the images. The chart of that version defaults its image tag to `.Chart.Version`, so the two are the same number by construction.
+- `appVersion` is **not** touched (`onlyUpdateVersion` is set). It records which upstream MiroFish is inside and moves only when `UPSTREAM_REF` does — change both in the same commit.
+- The release runs under `POL_GH_TOKEN`, not `GITHUB_TOKEN`. Pushes made with `GITHUB_TOKEN` do not trigger workflows, so the tag would land and the images would never build.

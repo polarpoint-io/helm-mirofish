@@ -41,7 +41,7 @@ spec:
         {{- toYaml .Values.web.podSecurityContext | nindent 8 }}
       containers:
         - name: web
-          image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.web.image "defaultTag" .Chart.AppVersion) }}
+          image: {{ include "mirofish.image" (dict "ctx" $ "image" .Values.web.image "defaultTag" .Chart.Version) }}
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           ports:
             - name: http

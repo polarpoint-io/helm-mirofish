@@ -8,10 +8,11 @@ name: images
 
 on:
   push:
-    # No `paths:` filter here. GitHub applies path filters to tag pushes too,
-    # and a release commit typically touches Chart.yaml rather than docker/ --
-    # which would silently skip the very build the tag exists to trigger.
-    branches: [main]
+    # Tags only. semantic-release tags every release on main, so building on
+    # branch pushes as well would build this ~8GB image twice for each one. No
+    # `paths:` filter either: GitHub applies those to tag pushes too, and a
+    # release commit touches Chart.yaml rather than docker/, which would
+    # silently skip the very build the tag exists to trigger.
     tags: ["v*"]
   pull_request:
     paths:
@@ -109,13 +110,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirofish-offline-${{ matrix.component }}
           tags: |
-            # A v<appVersion> tag produces the tag the chart defaults to.
+            # The v<version> tag semantic-release created; this is what the
+            # chart of the same version defaults its image tag to.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=branch
             type=ref,event=pr
             type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            # Releases are the only thing built here now, so every one of them
+            # is the latest.
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.title=MiroFish-Offline ${{ matrix.component }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

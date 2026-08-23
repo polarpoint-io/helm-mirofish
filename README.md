@@ -116,6 +116,8 @@ hack/
   check-names.py             object-name uniqueness and length sweep
   build-hero.py              regenerates static/hero.png (`make hero`)
 static/hero.png              README banner
+.releaserc.json              semantic-release configuration
+commitlint.config.js         conventional commits, enforced
 Makefile                     build, lint, validate, install
 ```
 
@@ -136,20 +138,32 @@ The API image is large — roughly 8GB, dominated by the ML stack `camel-ai` pul
 
 ## Releasing
 
-| What | Trigger |
-|---|---|
-| Images | Push to `main` touching `docker/` or `UPSTREAM_REF`, or a `v*` tag. Published to `ghcr.io/polarpoint-io/mirofish-offline-{api,web}`. |
-| Chart | A `chart-v<semver>` tag matching `Chart.yaml`'s `version`. Published to `oci://ghcr.io/polarpoint-io/charts/mirofish-offline`. |
+Releases are driven by [semantic-release](https://semantic-release.gitbook.io/), the same as the rest of the estate. There is no version to bump by hand and no tag to remember.
 
-The two tags are separate on purpose: `v0.2.0` versions the application images, `chart-v0.2.0` versions the packaging. Because the chart defaults its image tag to `appVersion`, bumping `appVersion` means pushing a matching `v*` tag, or the default install will not find an image.
+Merge a conventional commit to `main` and the `release` workflow does the rest:
+
+| Commit prefix | Effect |
+|---|---|
+| `fix:` | patch — 0.2.0 → 0.2.1 |
+| `feat:` | minor — 0.2.0 → 0.3.0 |
+| `feat!:`, or a `BREAKING CHANGE:` footer | major — 0.2.0 → 1.0.0 |
+| `chore:`, `docs:`, `ci:`, `test:` | no release |
+
+In order: `make check` runs, `semantic-release-helm3` writes the new version into `Chart.yaml` and pushes the packaged chart to `oci://ghcr.io/polarpoint-io/charts`, a `CHANGELOG.md` entry and a GitHub release are generated, and a `v<version>` tag is pushed. That tag is what builds and publishes `ghcr.io/polarpoint-io/mirofish-offline-{api,web}:<version>`.
+
+Two details worth knowing. `appVersion` is **not** touched — `onlyUpdateVersion` is set, because `appVersion` records which upstream MiroFish is inside and moves only when `UPSTREAM_REF` does. And the release runs under a PAT rather than `GITHUB_TOKEN`, because pushes made with `GITHUB_TOKEN` do not trigger workflows, which would leave the tag sitting there with no images ever built.
+
+A commit that does not parse as conventional simply produces no release. `commitlint.config.js` is there to catch that at commit time rather than in a week's silence.
 
 To pick up new upstream code:
 
 ```bash
 make upstream-latest     # repins UPSTREAM_REF to upstream HEAD
 make relock              # regenerate docker/backend-uv.lock for the new ref
-git commit -am "build: repin upstream to $(cat UPSTREAM_REF)"
+git commit -am "feat: repin upstream to $(cat UPSTREAM_REF)"
 ```
+
+`feat:` rather than `build:` if you want that to cut a release — new upstream code is a new version of what this chart ships. Remember to move `appVersion` in the same commit; semantic-release deliberately leaves it alone.
 
 ## Licence
 

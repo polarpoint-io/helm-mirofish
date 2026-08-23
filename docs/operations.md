@@ -30,7 +30,9 @@ git push
 
 The relock step is not optional. Upstream's own `backend/uv.lock` is stale and cannot be installed from; this repo vendors a regenerated one, and the image build asserts it still matches upstream's `pyproject.toml`.
 
-Pushing to `main` builds and publishes new images. Then bump `appVersion` in `Chart.yaml`, tag `chart-v<version>`, and the release workflow publishes the chart.
+Use a `feat:` commit and move `appVersion` in `Chart.yaml` to match the upstream release in the same change — semantic-release owns `version:` but deliberately leaves `appVersion` alone.
+
+Merging to `main` then does everything: `make check`, a new chart version pushed to `oci://ghcr.io/polarpoint-io/charts`, a changelog entry, a GitHub release, and a `v<version>` tag whose push builds and publishes the images.
 
 ## Backup
 

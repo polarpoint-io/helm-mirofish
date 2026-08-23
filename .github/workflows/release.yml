@@ -1,27 +1,32 @@
-name: release-chart
+name: release
 
-# Packages the chart and publishes it as an OCI artifact:
-#   oci://ghcr.io/<owner>/charts/mirofish-offline
+# Semantic release, the same shape the rest of the estate uses: conventional
+# commits on main decide the version, semantic-release-helm3 writes it into
+# Chart.yaml and pushes the packaged chart to GHCR, and the resulting v<version>
+# tag is what builds the images.
 #
-# Triggered by a tag of the form chart-v<semver>, e.g. chart-v0.1.0.
+# Replaces a hand-driven scheme where a chart-v<semver> tag had to be created by
+# hand and kept in step with Chart.yaml. Two tag namespaces and a manual version
+# bump are two more things to get wrong.
 
 on:
   push:
-    tags: ["chart-v*"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
-env:
-  CHART: charts/mirofish-offline
-
 jobs:
-  release:
+  # semantic-release has no way to depend on another workflow, so the chart
+  # validation runs here too. Releasing a chart that does not render is worse
+  # than releasing nothing.
+  validate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v7
 
@@ -29,50 +34,50 @@ jobs:
         with:
           version: v3.16.3
 
-      - name: Resolve and check the chart version
+      - name: Install kubeconform
         run: |
-          set -euo pipefail
-          chart_version="$(helm show chart "$CHART" | grep '^version:' | awk '{print $2}')"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            tag="${GITHUB_REF_NAME#chart-v}"
-            if [ "$tag" != "$chart_version" ]; then
-              echo "::error::tag chart-v$tag does not match Chart.yaml version $chart_version"
-              exit 1
-            fi
-          else
-            # workflow_dispatch runs from a branch, where GITHUB_REF_NAME is
-            # the branch name and carries no version to compare against.
-            echo "Manual run: publishing version $chart_version from $GITHUB_REF_NAME"
-          fi
-          echo "version=$chart_version" >> "$GITHUB_ENV"
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
 
-      - name: Lint
-        run: helm lint "$CHART" --strict
+      - name: Lint, render every scenario, check names
+        run: make check
 
-      - name: Package
-        run: helm package "$CHART" --destination dist
+  release:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # semantic-release reads the whole tag history to work out the last
+          # release; a shallow clone makes every run look like the first.
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.POL_GH_TOKEN }}
 
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      # semantic-release-helm3 shells out to `helm push`, so the registry has to
+      # be logged in before the plugin runs.
       - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Push chart
-        run: |
-          helm push "dist/mirofish-offline-${{ env.version }}.tgz" \
-            "oci://ghcr.io/${{ github.repository_owner }}/charts"
-
-      - name: Create GitHub release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
         with:
-          files: dist/*.tgz
-          generate_release_notes: true
-          body: |
-            Install:
-
-            ```
-            helm install mirofish oci://ghcr.io/${{ github.repository_owner }}/charts/mirofish-offline \
-              --version ${{ env.version }} \
-              --namespace mirofish --create-namespace
-            ```
+          extra_plugins: "semantic-release-helm3 @semantic-release/exec @semantic-release/changelog @semantic-release/git"
+        env:
+          # A PAT rather than GITHUB_TOKEN on purpose: pushes made with
+          # GITHUB_TOKEN do not trigger workflows, so the v<version> tag would
+          # land and the images would never build.
+          GH_TOKEN: ${{ secrets.POL_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.POL_GH_TOKEN }}
