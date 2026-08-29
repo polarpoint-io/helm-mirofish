@@ -72,7 +72,7 @@ jobs:
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Semantic Release
-        uses: cycjimmy/semantic-release-action@v4
+        uses: cycjimmy/semantic-release-action@v6
         with:
           extra_plugins: "semantic-release-helm3 @semantic-release/exec @semantic-release/changelog @semantic-release/git"
         env:
