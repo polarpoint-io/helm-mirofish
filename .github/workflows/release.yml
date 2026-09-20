@@ -51,6 +51,12 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
+      # semantic-release-helm3 shells out to `helm push` against GHCR, which is
+      # a package write. A job-level permissions block replaces the default set
+      # outright rather than adding to it, so leaving this out gave GITHUB_TOKEN
+      # `packages: none` and the blob upload came back 403 Forbidden -- after
+      # the git tag had already been pushed.
+      packages: write
     steps:
       - uses: actions/checkout@v7
         with:
