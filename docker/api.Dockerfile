@@ -97,12 +97,30 @@ COPY --from=builder --chown=10001:10001 /app/backend /app/backend
 
 # Uploaded documents, generated reports and OASIS simulation output all land
 # under uploads/. The chart mounts a PersistentVolumeClaim over it.
+#
+# logs/ must exist and be writable before the first import: upstream's
+# app/utils/logger.py runs setup_logger() at module scope and hardcodes
+# LOG_DIR to <backend>/logs with no env override, so a missing or unwritable
+# directory kills the worker during `app:create_app()` rather than degrading
+# to console-only logging.
+#
+# Creating it here is not enough on its own -- WORKDIR made /app/backend as
+# root, and `COPY --chown` only relabels what it copies, not a destination
+# directory that already exists. So /app/backend itself stays root-owned and
+# uid 10001 cannot mkdir inside it. Both the directory and its parent are
+# handed over explicitly.
 RUN mkdir -p /app/backend/uploads/projects \
              /app/backend/uploads/reports \
              /app/backend/uploads/simulations \
- && chown -R 10001:10001 /app/backend/uploads
+             /app/backend/logs \
+ && chown 10001:10001 /app/backend \
+ && chown -R 10001:10001 /app/backend/uploads /app/backend/logs
 
 USER 10001
+
+# Fail the build here rather than in a CrashLooping pod. Both directories are
+# written to before the app finishes importing.
+RUN test -w /app/backend/logs && test -w /app/backend/uploads
 
 EXPOSE 5001
 

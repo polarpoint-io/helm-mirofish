@@ -24,10 +24,11 @@ If `$REPO/UPSTREAM_REF` changed, also run `make -C "$REPO" relock` then `make -C
 - **`$REPO/docker/backend-uv.lock` overrides upstream's `backend/uv.lock`.** Upstream's is the pre-fork lock — it names the project `mirofish-backend 0.1.0`, still carries `zep-cloud`, and `uv sync` against it fails outright. Regenerate with `make -C "$REPO" relock`, never by copying upstream's back.
 - **`OASIS_DEFAULT_MAX_ROUNDS` and the `REPORT_AGENT_*` variables are not exposed as values.** Upstream reads them into its `Config` class but nothing consumes them. Exposing them would be offering settings that quietly do nothing.
 
-## Two traps already paid for
+## Three traps already paid for
 
 - **gunicorn must be installed *after* the last `uv sync`.** `uv sync` is exact by default and prunes anything absent from the lockfile, so installing earlier leaves the image without the binary its `CMD` invokes. `$REPO/docker/api.Dockerfile` has a build-time assertion for this.
 - **`COPY --from=` cannot take a variable stage name.** BuildKit resolves stage names before build args. Pull versioned images in as a named `FROM ... AS` stage instead.
+- **`COPY --chown` does not chown an existing destination directory.** `WORKDIR /app/backend` creates it as root, so uid 10001 cannot `mkdir` inside it at runtime. Upstream's `app/utils/logger.py` calls `os.makedirs(<backend>/logs)` at *module scope* with `LOG_DIR` hardcoded and no env override, so this killed the worker during `app:create_app()`. `$REPO/docker/api.Dockerfile` creates `logs/`, chowns `/app/backend` itself, and asserts both `logs/` and `uploads/` are writable as the runtime user.
 
 ## Releases
 
