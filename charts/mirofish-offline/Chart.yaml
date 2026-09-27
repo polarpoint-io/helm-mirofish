@@ -8,7 +8,7 @@ type: application
 # Written by semantic-release from the conventional commits on main; do not
 # edit by hand. This is also the tag of the images this chart defaults to,
 # because they are built from the same release.
-version: 0.2.1
+version: 0.2.2
 
 # The upstream MiroFish-Offline release these images are built from, pinned in
 # UPSTREAM_REF. semantic-release is configured with onlyUpdateVersion, so it
