@@ -13,6 +13,11 @@ on:
     # `paths:` filter either: GitHub applies those to tag pushes too, and a
     # release commit touches Chart.yaml rather than docker/, which would
     # silently skip the very build the tag exists to trigger.
+    #
+    # The release commit must also not carry `[skip ci]`: Actions evaluates
+    # that against the head commit of the push event, and the version tag
+    # points at exactly that commit, so it suppresses this build too. See
+    # the git plugin's `message` in .releaserc.json.
     tags: ["v*"]
   pull_request:
     paths:
